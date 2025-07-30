@@ -1,4 +1,6 @@
 from typing import Any, Annotated
+from datetime import date
+from enum import Enum
 
 from fastapi import FastAPI, HTTPException, Path, Query
 from pydantic import BaseModel, Field
@@ -7,25 +9,44 @@ app = FastAPI(
     title="Student Database"
 )
 
+class Major(Enum):
+    ICT = "ict"
+    MATH = "math"
+    DATA_SCIENCE = "ds"
+    CYBER_SECURITY = "cyber"
+    COMPUTER_SCIENCE = "cs"
+
 class Student(BaseModel):
     name: str
-    age: int = Field(gt=0)
-    year: str = Field(description="Class that the student is studying")
+    dob: date
+    group: Major
     
-students = {
-    1: Student(
-        name="John", age=17, year="12A"
-    ),
-    2: Student(
-        name="Tim", age=15, year="10D"
-    )
-}
+class Mark(BaseModel):
+    attendance: Annotated[float, Field(ge=0, le=20)]
+    mid_term: Annotated[float, Field(ge=0, le=20)]
+    final: Annotated[float, Field(ge=0, le=20)]
+    is_passed: bool
+    
+students = [
+    {
+        "student_id": 1,
+        "student": Student(name="Nam", dob=date(2005, 7, 30), group=Major.ICT),
+        "mark": Mark(attendance=20, mid_term=17.5, final=15, is_passed=True)
+    },
+    {
+        "student_id": 2,
+        "student": Student(name="Long", dob=date(2005, 12, 1), group=Major.COMPUTER_SCIENCE),
+        "mark": Mark(attendance=18, mid_term=10, final=10.5, is_passed=True)
+    }
+]
 
+# Homepage
 @app.get("/")
 def index():
     return {"list of students": students}
 
-# Get student by ID
+
+# Get student by ID 
 @app.get(
     "/get-student/{student_id}",
     responses={
@@ -33,9 +54,11 @@ def index():
     },
 )
 def get_student(student_id: int):
-    if student_id not in students:
-        raise HTTPException(status_code=404, detail=f"There is no student with ID {student_id}")
-    return students[student_id]
+    for student in students:
+        if student["student_id"] == student_id:
+            return student
+    raise HTTPException(status_code=404, detail=f"Student with ID {student_id} does not exist")
+
 
 # Get student by name
 @app.get(
@@ -44,17 +67,57 @@ def get_student(student_id: int):
         404: {"description": "Not found"},
     },
 )
-def get_student_by_name(name: str) -> dict[str, Any]:
-    def check_name(student: Student) -> bool:
-        return student.name == name
+def get_student_by_name(name: Annotated[str | None, Query(description="Enter first name of the student")] = None):
+    if name is None:
+        return {"students": students}
     
-    selection = [student for student in students.values() if check_name(student)]  # Fixed: pass student instead of name
+    matched_students = []
+    for student in students:
+        # Check if the student has 'student' key and if that student has a name that matches
+        if "student" in student and isinstance(student["student"], Student) and student["student"].name.lower() == name.lower():
+            matched_students.append(student)      
+            
+    if not matched_students:
+        raise HTTPException(status_code=404, detail=f"Student with name {name} does not exist")  
     
-    if not selection:
-        raise HTTPException(status_code=404, detail=f"No student available with the name {name}")
+    return {"student": matched_students}
+
+# Get student whether they're passed or not
+@app.get(
+    "/get-by-status",
+    responses={
+        404: {"description": "Not found"},
+    },
+)
+def get_student_by_status(passed: bool):
+    matched_students = []
+    for student in students:
+        if "mark" in student and isinstance(student["mark"], Mark) and student["mark"].is_passed == passed:
+            matched_students.append(student)
+            
+    if not matched_students:
+        raise HTTPException(status_code=404, detail="No students found in this query.")
     
-    return {"selection": selection}
-        
+    return {"student": matched_students}
+
+# Get student by their group
+@app.get(
+    "/get-by-group",
+    responses={
+        404: {"description": "Not found"},
+    }
+)
+def get_student_by_group(group: Major):
+    matched_students = []
+    for student in students:
+        if "student" in student and isinstance(student["student"], Student) and student["student"].group == group:
+            matched_students.append(student)
+            
+    if not matched_students:
+        raise HTTPException(status_code=404, detail="No students found in this group")
+    
+    return {group: matched_students}
+
 # Create a Student object
 @app.post(
     "/create-student/{student_id}",
@@ -62,12 +125,20 @@ def get_student_by_name(name: str) -> dict[str, Any]:
         400: {"description": "Duplicate ID"},
     },
 )
-def create_student(student_id: int, student: Student):
-    if student_id in students:
-        raise HTTPException(status_code=400, detail=f"Student with id {student_id} already exist")
-    
-    students[student_id] = student
-    return students[student_id]
+def create_student(student_id: int, student: Student, mark: Mark):
+    for existing_student in students:
+        if existing_student["student_id"] == student_id:
+            raise HTTPException(status_code=400, detail=f"Student with ID {student_id} already exists.")
+        
+    new_student = {"student_id": student_id}
+    if student:
+        new_student.update({"student": student})
+    if mark:
+        new_student.update({"mark": mark})
+        
+    students.append(new_student)
+    return new_student
+
 
 # Update student info
 @app.put(
@@ -79,24 +150,26 @@ def create_student(student_id: int, student: Student):
 )
 def update_student(
     student_id: Annotated[int, Path(gt=0)],
-    name: str | None = None,
-    age: Annotated[int | None, Query(gt=0)] = None,
-    year: str | None = None
+    student: Student | None = None,
+    mark: Mark | None = None
 ):
-    if student_id not in students:
-        raise HTTPException(status_code=404, detail=f"Student with id {student_id} does not exist")
-    if all(info is None for info in (name, age, year)):
-        raise HTTPException(status_code=400, detail="No parameters provided for update")
-    
-    student = students[student_id]
-    if name is not None:
-        student.name = name
-    if age is not None:
-        student.age = age
-    if year is not None:
-        student.year = year
+    result = None
+    for student_ in students:
+        if student_["student_id"] == student_id:
+            result = student_
+            break
         
-    return {"updated": student}
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Student with ID {student_id} does not exist.")
+    
+    
+    if student is not None:
+        result["student"] = student
+    if mark is not None:
+        result["mark"] = mark
+        
+    return {"updated": result}
+
 
 # Delete a student
 @app.delete(
@@ -106,8 +179,14 @@ def update_student(
     },
 )
 def delete_student(student_id: int):
-    if student_id not in students:
-        raise HTTPException(status_code=404, detail=f"Student with id {student_id} does not exist")
-    
-    student = students.pop(student_id)
-    return {"deleted": student}
+    result = None
+    for student_ in students:
+        if student_["student_id"] == student_id:
+            result = student_
+            break
+        
+    if result is None:
+            raise HTTPException(status_code=404, detail=f"Student with ID {student_id} does not exist.")
+        
+    students.remove(result)
+    return {"removed": result}
