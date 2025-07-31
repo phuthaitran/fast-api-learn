@@ -118,6 +118,33 @@ def get_student_by_group(group: Major):
     
     return {group: matched_students}
 
+@app.get(
+    "/students",
+    responses={
+        404: {"description": "Not Found"}
+    }
+)
+def query_student_by_parameters(
+    name: str | None = None,
+    passed: bool | None = None,
+    group: Major | None = None
+):
+    matched_students = []
+    for student in students:
+        if all(
+            (
+                name is None or ("student" in student and isinstance(student["student"], Student) and student["student"].name.lower() == name.lower()),
+                passed is None or ("mark" in student and isinstance(student["mark"], Mark) and student["mark"].is_passed == passed),
+                group is None or ("student" in student and isinstance(student["student"], Student) and student["student"].group == group)
+            )
+        ):
+            matched_students.append(student)
+            
+    if not matched_students:
+        raise HTTPException(status_code=404, detail="No students found in this query.")
+    
+    return {"student": matched_students}
+
 # Create a Student object
 @app.post(
     "/create-student/{student_id}",
