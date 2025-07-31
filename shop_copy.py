@@ -38,6 +38,12 @@ items = [
         "item": Item(name="Hammer", description=None, price=8.5, tax=0),
         "user": User(username="tony", full_name="Tony Tran"),
         "importance": 1
+    },
+    {
+        "item_id": 2,
+        "item": Item(name="Pliers", description=None, price=5.99, tax=0.05),
+        "user": User(username="john", full_name=None),
+        "importance": 2
     }
 ]
 
@@ -46,7 +52,7 @@ def index():
     return {"items": items}
 
 
-@app.post("/")
+@app.post("/items")
 async def add_item(
     item_id: int,
     item: Item,
@@ -113,30 +119,23 @@ def query_items_by_id(item_id: int):
             return item
     raise HTTPException(status_code=404, detail=f"Item with {item_id} does not exist")
 
-@app.get("/items/")
-def query_items_by_name(name: str | None = None):
-    if name is None:
-        return {"items": items}
-    
+# Search by parameters
+@app.get("/items")
+def query_items_by_parameters(
+    name: str | None = None,
+    importance: int | None = None
+):
     matched_items = []
     for item in items:
-        # Check if the item has 'item' key and if that item has a name that matches
-        if "item" in item and isinstance(item["item"], Item) and item["item"].name.lower() == name.lower():
-            matched_items.append(item)
-    
-    if not matched_items:
-        raise HTTPException(status_code=404, detail=f"No items found with name: {name}")
-    
-    return {"items": matched_items}
-
-@app.get("/items-by-importance")
-def query_items_by_importance(importance: int):
-    matched_items = []
-    for item in items:
-        if item["importance"] == importance:
+        if all(
+            (
+                name is None or ("item" in item and isinstance(item["item"], Item) and item["item"].name.lower() == name.lower()),
+                importance is None or item["importance"] == importance 
+            )
+        ):
             matched_items.append(item)
             
     if not matched_items:
-        raise HTTPException(status_code=404, detail=f"No items found with importance of {importance}")
+        raise HTTPException(status_code=404, detail="No items found for this query")
     
     return {"items": matched_items}
